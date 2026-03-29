@@ -22,7 +22,7 @@ The project is part of reinforcement learning coursework and focuses on:
 * Manual robot control using keyboard
 * Automatic control using RL algorithms
 * Configurable environment difficulty
-* Evaluation and leaderboard system
+* Evaluation and leaderboard system on Codabench
 
 ---
 
