@@ -167,15 +167,6 @@ L45, L22, FW, R22, R45
 * 🔗 https://cdn.aaai.org/AAAI/1991/AAAI91-120.pdf
 * 🔗 https://github.com/iabhinavjoshi/OBELIX
 * 🎓 NPTEL Reinforcement Learning Course (2023)
-
+* CS780 Deep Reinforcement Learning IITK 2026
 ---
 
-## 👨‍💻 Author
-
-**Rahul Kumar Meena**
-
----
-
-## ⭐ Repository
-
-If you find this useful, consider giving it a ⭐ on GitHub!
