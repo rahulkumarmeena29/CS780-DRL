@@ -1,8 +1,12 @@
 from __future__ import annotations
 import argparse
 import random
+import os
 from collections import deque
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")  
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -89,6 +93,33 @@ def set_seed(seed: int):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
+def plotResults(plot_history, all_ep_rets, args):
+    if plot_history:
+        ep_nums, means = zip(*plot_history)
+        raw_eps, raw_rets = zip(*all_ep_rets) if all_ep_rets else ([], [])
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.scatter(raw_eps, raw_rets, color="green", s=4, alpha=0.35, label="Episode return")
+        ax.plot(ep_nums, means, color="red", linewidth=2.0, label="Rolling mean (50 eps)")
+        ax.axhline(0, color="black", linestyle="--", linewidth=0.8)
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Return")
+        ax.set_title(f"VPG Training — D{args.difficulty} {'+ walls' if args.wall_obstacles else ''}")
+        ax.legend()
+        plot_path = args.out.replace(".pth", "_curve.png")
+        fig.tight_layout()
+        fig.savefig(plot_path, dpi=150)
+        plt.close(fig)
+        print(f"Saved training curve → {plot_path}")
+
+def save_checkpoint(path, policy_net, value_net):
+    # Saves the ENTIRE agent state so curriculum training can resume flawlessly
+    checkpoint = {
+        "state_dict": policy_net.state_dict(),
+        "value_state_dict": value_net.state_dict()
+    }
+    torch.save(checkpoint, path)
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--obelix_py", type=str, required=True)
@@ -102,18 +133,19 @@ def main():
     ap.add_argument("--scaling_factor", type=int, default=5)
     ap.add_argument("--arena_size", type=int, default=500)
     ap.add_argument("--gamma", type=float, default=0.99)
-    ap.add_argument("--policy_lr", type=float, default=3e-4) # bumped policy lr slightly
-    ap.add_argument("--value_lr", type=float, default=1e-3) # increased value lr to help value net catch up
+    ap.add_argument("--policy_lr", type=float, default=3e-4) 
+    ap.add_argument("--value_lr", type=float, default=1e-3) 
     ap.add_argument("--entropy_coef", type=float, default=0.01)
     ap.add_argument("--value_coef", type=float, default=0.5)
     ap.add_argument("--normalize_returns", action="store_true")
     ap.add_argument("--normalize_advantages", action="store_true")
     ap.add_argument("--max_grad_norm", type=float, default=0.5)
     ap.add_argument("--frame_stack", type=int, default=32)
-    ap.add_argument("--reward_scale", type=float, default=0.005) # reduced from 0.05 to scale down value targets
+    ap.add_argument("--reward_scale", type=float, default=0.005) 
     ap.add_argument("--reward_clip", type=float, default=10.0)
     ap.add_argument("--gae_lambda", type=float, default=0.95)
     ap.add_argument("--value_epochs", type=int, default=10)
+    ap.add_argument("--load_weights", type=str, default="")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -122,14 +154,36 @@ def main():
     print("Using device:", device)
     OBELIX = import_obelix(args.obelix_py)
     in_dim = 18 * args.frame_stack
+    
     policy_net = PolicyNet(in_dim=in_dim).to(device)
     value_net = ValueNet(in_dim=in_dim).to(device)
+    
     with torch.no_grad():
         policy_net.net[-1].bias.data[2] += 0.5
+        
+    # Curriculum Learning: Load weights if provided
+    if args.load_weights:
+        checkpoint = torch.load(args.load_weights, map_location=device)
+        if isinstance(checkpoint, dict) and "value_state_dict" in checkpoint:
+            policy_net.load_state_dict(checkpoint["state_dict"])
+            value_net.load_state_dict(checkpoint["value_state_dict"])
+            print(f"Loaded FULL VPG checkpoint from {args.load_weights} (Curriculum mode active)")
+        else:
+            sd = checkpoint["state_dict"] if (isinstance(checkpoint, dict) and "state_dict" in checkpoint) else checkpoint
+            policy_net.load_state_dict(sd, strict=True)
+            print(f"Warning: Loaded ONLY actor weights from {args.load_weights}. Value network randomly initialized.")
+
     policy_optimizer = optim.Adam(policy_net.parameters(), lr=args.policy_lr)
     value_optimizer = optim.Adam(value_net.parameters(), lr=args.value_lr)
+    
     best_train_return = -float("inf")
     total_episodes_done = 0
+    
+    # Bookkeeping for plotting
+    all_ep_rets = []
+    plot_history = []
+    last50_rets = []
+
     while total_episodes_done < args.episodes:
         batch_states = []
         batch_log_probs = []
@@ -198,6 +252,12 @@ def main():
 
                 if done:
                     break
+            
+            # Record keeping for this episode
+            all_ep_rets.append((ep, ep_ret))
+            last50_rets.append(ep_ret)
+            if len(last50_rets) > 50:
+                last50_rets.pop(0)
 
             if len(rewards) == 0:
                 continue
@@ -218,27 +278,34 @@ def main():
             returns_t = torch.from_numpy(returns).float().to(device)
             advantages_t = torch.from_numpy(advantages).float().to(device)
             states_t = torch.from_numpy(np.stack(states)).float().to(device)
+            
             batch_states.append(states_t)
             batch_log_probs.append(torch.cat(log_probs))
             batch_entropies.append(torch.cat(entropies))
             batch_returns.append(returns_t)
             batch_advantages.append(advantages_t)
             train_returns_this_round.append(ep_ret)
+            
             if ep_ret > best_train_return:
                 best_train_return = ep_ret
-                torch.save(policy_net.state_dict(), args.out)
+                save_checkpoint(args.out, policy_net, value_net)
 
         total_episodes_done += episodes_this_round
+        
         if len(batch_states) == 0:
             continue
+            
         states_t = torch.cat(batch_states, dim=0)
         log_probs_t = torch.cat(batch_log_probs, dim=0)
         entropies_t = torch.cat(batch_entropies, dim=0)
         returns_t = torch.cat(batch_returns, dim=0)
         advantages_t = torch.cat(batch_advantages, dim=0)
+        
         if args.normalize_advantages and len(advantages_t) > 1:
             advantages_t = (advantages_t - advantages_t.mean()) / (advantages_t.std() + 1e-8)
+            
         policy_loss = -(log_probs_t * advantages_t.detach()).mean() - args.entropy_coef * entropies_t.mean()
+        
         policy_optimizer.zero_grad()
         policy_loss.backward()
         nn.utils.clip_grad_norm_(policy_net.parameters(), args.max_grad_norm)
@@ -254,17 +321,29 @@ def main():
             value_optimizer.step()
             value_loss_final = value_loss.item()
 
+        # Generate output logs
         mean_train_return = float(np.mean(train_returns_this_round)) if train_returns_this_round else float("nan")
+        mean_50 = np.mean(last50_rets) if last50_rets else mean_train_return
+        
+        plot_history.append((total_episodes_done, mean_50))
 
         print(
             f"Episodes {total_episodes_done}/{args.episodes} "
-            f"mean_train_return={mean_train_return:.2f} "
-            f"best_train_return={best_train_return:.2f} "
+            f"mean_50={mean_50:.1f} "
+            f"best_train_return={best_train_return:.1f} "
             f"policy_loss={policy_loss.item():.4f} "
             f"value_loss={value_loss_final:.4f} "
             f"entropy={entropies_t.mean().item():.4f}"
         )
-    print("Saved best training policy to:", args.out)
+        
+    print(f"\nTraining Complete! Best return: {best_train_return:.1f}")
+    
+    # Save the absolute final network state at the end of training
+    save_checkpoint(args.out, policy_net, value_net)
+    print(f"Saved full VPG checkpoint → {args.out}")
+
+    # Plot the results
+    plotResults(plot_history, all_ep_rets, args)
 
 if __name__ == "__main__":
     main()
