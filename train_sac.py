@@ -212,8 +212,7 @@ class SAC:
         self.MAX_EVAL_EPISODES = MAX_EVAL_EPISODES
         self.args = args
         self.device = device
-        
-        # Initializing Networks
+
         self.policyNetwork = PolicyNetwork().to(device)
         self.onlineValueNetwork_1 = ValueNetwork().to(device)
         self.onlineValueNetwork_2 = ValueNetwork().to(device)
@@ -223,16 +222,14 @@ class SAC:
         self.targetValueNetwork_1.load_state_dict(self.onlineValueNetwork_1.state_dict())
         self.targetValueNetwork_2.load_state_dict(self.onlineValueNetwork_2.state_dict())
 
-        # Entropy Tuning
         self.target_entropy = -np.log(1.0 / N_ACTIONS) * 0.5
         self.logAlpha = torch.zeros(1, requires_grad=True, device=device)
         self.alpha = self.logAlpha.exp().item()
 
-        # Load full agent state if curriculum learning is active
+        #loading full agent state if curriculum learning is active
         if args.load_weights:
             checkpoint = torch.load(args.load_weights, map_location=device)
-            
-            # Check if it's our full checkpoint format
+
             if isinstance(checkpoint, dict) and "q1_state_dict" in checkpoint:
                 self.policyNetwork.load_state_dict(checkpoint["state_dict"])
                 self.onlineValueNetwork_1.load_state_dict(checkpoint["q1_state_dict"])
@@ -243,25 +240,21 @@ class SAC:
                 self.alpha = self.logAlpha.exp().item()
                 print(f"Loaded FULL agent checkpoint from {args.load_weights} (Curriculum mode active)")
             else:
-                # Fallback just in case you load an old policy-only weights file
                 sd = checkpoint["state_dict"] if (isinstance(checkpoint, dict) and "state_dict" in checkpoint) else checkpoint
                 self.policyNetwork.load_state_dict(sd, strict=True)
                 print(f"Warning: Loaded ONLY actor weights from {args.load_weights}. Critics are randomly initialized.")
 
-        # Optimizers 
         self.policyOptimizerFn = optim.Adam(self.policyNetwork.parameters(), lr=args.lr)
         self.valueOptimizerFn_1 = optim.Adam(self.onlineValueNetwork_1.parameters(), lr=args.lr)
         self.valueOptimizerFn_2 = optim.Adam(self.onlineValueNetwork_2.parameters(), lr=args.lr)
         self.alphaOptimizerFn = optim.Adam([self.logAlpha], lr=args.lr)
 
-        # Buffer & RND
         self.rBuffer = ReplayBuffer(bufferSize)
         self.rnd = RND(beta=args.rnd_beta, device=device)
 
         self.initBookKeeping()
 
     def save_checkpoint(self, path):
-        # Saves the ENTIRE agent state so training can resume flawlessly
         checkpoint = {
             "state_dict": self.policyNetwork.state_dict(),
             "q1_state_dict": self.onlineValueNetwork_1.state_dict(),
@@ -301,15 +294,13 @@ class SAC:
         last_logged = -1
 
         while self.n_done < self.MAX_TRAIN_EPISODES:
-            # Action Selection
             if self.rBuffer.length() < self.args.replay_start:
                 actions = self.selectRandomAction()
             else:
                 actions = self.selectAction(obs)
 
             obs2, rewards, dones = self.env.step(actions)
-
-            # Step Processing 
+ 
             for i in range(self.env.num_envs):
                 experience = (obs[i], actions[i], rewards[i], obs2[i], dones[i])
                 self.rBuffer.store(experience)
@@ -326,14 +317,11 @@ class SAC:
 
             obs = obs2
 
-            # Network Training
             if self.rBuffer.length() >= self.args.replay_start:
                 for _ in range(self.args.updates_per_step):
                     experiences = self.rBuffer.sample(self.args.batch)
                     self.trainNetworks(experiences)
-                # Removed double updateValueNetworks call here!
 
-            # Logging
             if self.n_done > 0 and self.n_done % 50 == 0 and self.n_done != last_logged and len(self.last50_ret) > 0:
                 last_logged = self.n_done
                 mean_50 = np.mean(self.last50_ret)
@@ -358,20 +346,17 @@ class SAC:
         r = r.to(self.device)
         s2 = s2.to(self.device)
         d = d.to(self.device)
-        
-        # RND Integration
+
         r_int = self.rnd.normalized(s2)
         self.rnd.update(s2)
         r_total = r + r_int.detach()
 
-        # Target Q Values
         with torch.no_grad():
             p2, lp2 = self.policyNetwork(s2)
             minq = torch.min(self.targetValueNetwork_1(s2), self.targetValueNetwork_2(s2))
             v_next = (p2 * (minq - self.alpha * lp2)).sum(1)
             tq = r_total + self.gamma * (1-d) * v_next
 
-        # Value Network Updates
         q1 = self.onlineValueNetwork_1(s).gather(1,a.unsqueeze(1)).squeeze()
         q2 = self.onlineValueNetwork_2(s).gather(1,a.unsqueeze(1)).squeeze()
         
@@ -385,7 +370,6 @@ class SAC:
         q2_loss.backward()
         self.valueOptimizerFn_2.step()
 
-        # Policy Network Update
         p, lp = self.policyNetwork(s)
         minq_s = torch.min(self.onlineValueNetwork_1(s), self.onlineValueNetwork_2(s))
         policyLoss = (p * (self.alpha * lp - minq_s)).sum(1).mean()
@@ -394,7 +378,6 @@ class SAC:
         policyLoss.backward()
         self.policyOptimizerFn.step()
 
-        # Entropy Weight Update
         entropy = -(p * lp).sum(1).detach()
         alphaLoss = (self.logAlpha * (entropy - self.target_entropy)).mean()
         
@@ -405,7 +388,6 @@ class SAC:
         self.logAlpha.data.clamp_(-3.0, 0.5)
         self.alpha = self.logAlpha.exp().item()
 
-        # Soft Update Targets
         self.updateValueNetworks(self.tau)
 
     def updateValueNetworks(self, tau):
@@ -427,7 +409,7 @@ class SAC:
                 
             if ep_ret > self.best_return:
                 self.best_return = ep_ret
-                self.save_checkpoint(self.args.out) # Full checkpoint save
+                self.save_checkpoint(self.args.out) 
                 
             self.total_success += success
             self.all_ep_rets.append((self.n_done, ep_ret))
