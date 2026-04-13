@@ -73,13 +73,11 @@ class VPG:
         self.best_raw_return = -float('inf')
         self.best_state_dict = None
         
-        # Trackers for the current episode's data
         self.ep_states = []
         self.ep_log_probs = []
         self.ep_rewards = []
         self.ep_entropies = []
         
-        # Trackers for logging
         self.current_ep_return = 0.0
         self.last_policy_loss = 0.0
         self.last_value_loss = 0.0
@@ -113,7 +111,6 @@ class VPG:
             s = env.reset(seed=self.args.seed + self.total_episodes_done)
             s = np.asarray(s, dtype=np.float32)
             
-            # Reset episode trackers
             self.ep_states = []
             self.ep_log_probs = []
             self.ep_rewards = []
@@ -178,13 +175,11 @@ class VPG:
         nn.utils.clip_grad_norm_(self.value_net.parameters(), 5.0)
         self.value_optimizer.step()
 
-        # Update bookkeeping variables
         self.last_policy_loss = policy_loss.item()
         self.last_value_loss = value_loss.item()
 
     def evaluateAgent(self):
         rewards = []
-        # Turn on eval mode for deterministic behavior if you add dropout/batchnorm later
         self.policy_net.eval() 
         
         for e in range(self.args.max_eval_episodes):
@@ -195,7 +190,7 @@ class VPG:
                 wall_obstacles=self.args.wall_obstacles,
                 difficulty=self.args.difficulty,
                 box_speed=self.args.box_speed,
-                seed=self.args.seed + 10000 + e, # Offset seed for evaluation
+                seed=self.args.seed + 10000 + e, 
             )
             s = env.reset()
             s = np.asarray(s, dtype=np.float32)
@@ -205,7 +200,6 @@ class VPG:
                 s_t = torch.from_numpy(s).float().unsqueeze(0).to(self.device)
                 with torch.no_grad():
                     logits = self.policy_net(s_t)
-                    # Greedy action selection for evaluation
                     act_idx = torch.argmax(logits).item() 
 
                 s2, r, done = env.step(ACTIONS[act_idx], render=False)
@@ -217,18 +211,16 @@ class VPG:
                     
             rewards.append(ep_rs)
             
-        self.policy_net.train() # Turn training mode back on
+        self.policy_net.train() 
         self.performBookKeeping(train=False)
         return float(np.mean(rewards)), float(np.std(rewards))
 
     def performBookKeeping(self, train=True):
         if train:
-            # Track best models
             if self.current_ep_return > self.best_raw_return:
                 self.best_raw_return = self.current_ep_return
                 self.best_state_dict = copy.deepcopy(self.policy_net.state_dict())
-                
-            # Print periodic updates
+
             if self.total_episodes_done % 50 == 0:
                 print(
                     f"Episode {self.total_episodes_done}/{self.args.episodes} "
@@ -238,7 +230,6 @@ class VPG:
                     f"best_return={self.best_raw_return:.2f}"
                 )
         else:
-            # You can add evaluation-specific logging here if desired
             pass
 
 
