@@ -18,7 +18,7 @@ OBS_DIM   = 18
 # =====================================================================
 # SUBPROCESS ENVIRONMENT WORKER & RND 
 # =====================================================================
-def _worker_fn(conn, obelix_py, env_kwargs, stuck_limit, seed_offset):
+def _worker_fn(conn, obelix_py, env_kwargs, stuck_limit):
     spec = importlib.util.spec_from_file_location("obelix_env", obelix_py)
     mod  = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
