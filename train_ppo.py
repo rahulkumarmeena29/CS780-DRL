@@ -46,6 +46,19 @@ class ValueNetwork(nn.Module):
         x2 = self.net[3](self.net[2](x1)) + x1
         return self.net[4](x2).squeeze(-1)
 
+
+def compute_gae(rewards, values, dones, gamma=0.99, lam=0.95):
+    T = len(rewards)
+    advantages = np.zeros(T, dtype=np.float32)
+    gae = 0.0
+    for t in reversed(range(T)):
+        delta = rewards[t] + gamma * values[t + 1] * (1.0 - dones[t]) - values[t]
+        gae = delta + gamma * lam * (1.0 - dones[t]) * gae
+        advantages[t] = gae
+    returns = advantages + values[:-1]
+    return advantages, returns
+
+
 def import_obelix(obelix_py: str):
     import importlib.util
     spec = importlib.util.spec_from_file_location("obelix_env", obelix_py)
@@ -63,17 +76,6 @@ class EpisodeBuffer:
         self.buffer_values = []
         self.batch_episode_returns = []
         self.batch_successes = 0
-
-    def compute_gae(self, rewards, values, dones, gamma=0.99, lam=0.95):
-        T = len(rewards)
-        advantages = np.zeros(T, dtype=np.float32)
-        gae = 0.0
-        for t in reversed(range(T)):
-            delta = rewards[t] + gamma * values[t + 1] * (1.0 - dones[t]) - values[t]
-            gae = delta + gamma * lam * (1.0 - dones[t]) * gae
-            advantages[t] = gae
-        returns = advantages + values[:-1]
-        return advantages, returns
         
     def fill(self, states, actions, log_probs_old, returns, advantages, values, ep_ret_raw, is_success):
         self.buffer_states.extend(states)
@@ -251,7 +253,7 @@ class PPO:
                 if len(rewards) == 0:
                     continue
 
-                advantages, returns = self.rBuffer.compute_gae(
+                advantages, returns = compute_gae(
                     rewards=np.array(rewards, dtype=np.float32),
                     values=np.array(values, dtype=np.float32),
                     dones=np.array(dones, dtype=np.float32),
