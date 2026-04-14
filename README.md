@@ -166,7 +166,6 @@ L45, L22, FW, R22, R45
 * 📄 Mahadevan & Connell (1991)
 * 🔗 https://cdn.aaai.org/AAAI/1991/AAAI91-120.pdf
 * 🔗 https://github.com/iabhinavjoshi/OBELIX
-* 🎓 NPTEL Reinforcement Learning Course (2023)
-* CS780 Deep Reinforcement Learning IITK 2026
+* 🎓 CS780 Deep Reinforcement Learning IITK 2026
 ---
 
